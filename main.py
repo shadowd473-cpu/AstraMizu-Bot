@@ -67,7 +67,7 @@ async def on_reaction_add(reaction, user):
 
 def get_ydl_opts():
     return {
-        'format': 'bestaudio/best',
+        'format': 'bestaudio/best[height<=480]',
         'noplaylist': True,
         'quiet': True,
         'no_warnings': True,
@@ -132,7 +132,7 @@ async def play(ctx, *, query: str):
     if "youtube.com" in query or "youtu.be" in query:
         url = query
     else:
-        with yt_dlp.YoutubeDL({'format': 'bestaudio', 'quiet': True, 'default_search': 'ytsearch'}) as ydl:
+        with yt_dlp.YoutubeDL({'format': 'bestaudio/best[height<=480]', 'quiet': True, 'default_search': 'ytsearch'}) as ydl:
             info = ydl.extract_info(f"ytsearch:{query}", download=False)['entries'][0]
             url = info['webpage_url']
 
@@ -190,13 +190,15 @@ async def singer_command(ctx, *, country: str = None):
 async def get_accurate_grok_answer(question: str):
     def _search():
         try:
-            resp = sync_client.responses.create(
-                model="grok-4.3",
-                input=[{"role": "user", "content": question}],
-                tools=[{"type": "web_search"}]
+            resp = sync_client.chat.completions.create(
+                model="grok-4",
+                messages=[{"role": "user", "content": question}],
+                tools=[{"type": "web_search"}],
+                max_tokens=200
             )
-            return resp.output[0].content[0].text.strip() if hasattr(resp, 'output') else "Couldn't fetch."
-        except:
+            return resp.choices[0].message.content.strip()
+        except Exception as e:
+            print(f"Web search error: {e}")
             return "Couldn't fetch right now."
     return await asyncio.to_thread(_search)
 
