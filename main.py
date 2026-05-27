@@ -14,6 +14,9 @@ import random
 from dotenv import load_dotenv
 load_dotenv()
 
+# Make OpenAI library happy with XAI key
+os.environ["OPENAI_API_KEY"] = os.getenv("XAI_API_KEY")
+
 intents = discord.Intents.default()
 intents.message_content = True
 intents.voice_states = True
