@@ -1,0 +1,198 @@
+import os
+import discord
+from discord.ext import commands
+from openai import AsyncOpenAI, OpenAI
+import chromadb
+from chromadb.utils import embedding_functions
+import asyncio
+import aiohttp
+import io
+import yt_dlp
+import random
+
+intents = discord.Intents.default()
+intents.message_content = True
+intents.voice_states = True
+intents.guilds = True
+
+bot = commands.Bot(command_prefix="!", intents=intents)
+
+client = AsyncOpenAI(
+    api_key=os.getenv("XAI_API_KEY"),
+    base_url="https://api.x.ai/v1"
+)
+
+sync_client = OpenAI(
+    api_key=os.getenv("XAI_API_KEY"),
+    base_url="https://api.x.ai/v1"
+)
+
+OWNER_ID = 406054379406229504
+TRIGGER_WORDS = ["astra", "mizu", "astramizu"]
+
+# Music Queue
+queues = {}
+voice_clients = {}
+
+# ChromaDB
+chroma_client = chromadb.PersistentClient(path="./chroma_db")
+embedding_function = embedding_functions.SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
+collection = chroma_client.get_or_create_collection(name="astra_memory", embedding_function=embedding_function)
+
+# REACTIONS
+REACTION_RESPONSES = {
+    "❤️": ["Aww~ Thank you! 💖", "Ehehe~ You're sweet! ❤️"],
+    "😘": ["Kyaa~! 😳", "Mwah~ 💋"],
+    "🔥": ["Oho~ Feeling bold? 😏"],
+    "😂": ["Glad I made you laugh~ 😄"],
+}
+
+@bot.event
+async def on_reaction_add(reaction, user):
+    if user.bot or reaction.message.author != bot.user: return
+    emoji = str(reaction.emoji)
+    if emoji in REACTION_RESPONSES:
+        await reaction.message.channel.send(random.choice(REACTION_RESPONSES[emoji]))
+
+# ====================== MUSIC SYSTEM ======================
+
+def get_ydl_opts():
+    return {
+        'format': 'bestaudio/best',
+        'noplaylist': True,
+        'quiet': True,
+        'no_warnings': True,
+        'extractor_args': {'youtube': {'player_client': ['ios', 'web']}},
+    }
+
+async def play_next(ctx):
+    if ctx.guild.id not in queues or not queues[ctx.guild.id]:
+        return
+
+    url = queues[ctx.guild.id].pop(0)
+    try:
+        vc = voice_clients[ctx.guild.id]
+
+        with yt_dlp.YoutubeDL(get_ydl_opts()) as ydl:
+            info = ydl.extract_info(url, download=False)
+            url2 = info['url']
+            title = info.get('title', 'Unknown')
+
+        source = discord.FFmpegPCMAudio(url2, **{'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5'})
+        vc.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(play_next(ctx), bot.loop))
+
+        await ctx.send(f"🎵 Now playing: **{title}**")
+    except Exception as e:
+        await ctx.send(f"Error playing: {str(e)[:100]}")
+        await play_next(ctx)
+
+@bot.command(name="join")
+async def join(ctx):
+    if ctx.author.voice is None:
+        return await ctx.send("You're not in a voice channel!")
+    if ctx.guild.id in voice_clients:
+        return await ctx.send("I'm already in VC!")
+
+    try:
+        vc = await ctx.author.voice.channel.connect(self_deaf=True)
+        voice_clients[ctx.guild.id] = vc
+        queues[ctx.guild.id] = []
+        await ctx.send(f"Joined {ctx.author.voice.channel.name}! ✨")
+    except Exception as e:
+        await ctx.send(f"Failed to join: {str(e)[:80]}")
+
+@bot.command(name="leave")
+async def leave(ctx):
+    if ctx.guild.id not in voice_clients:
+        return await ctx.send("I'm not in a voice channel!")
+    try:
+        await voice_clients[ctx.guild.id].disconnect()
+        voice_clients.pop(ctx.guild.id, None)
+        queues.pop(ctx.guild.id, None)
+        await ctx.send("Left the voice channel~ 👋")
+    except:
+        pass
+
+@bot.command(name="play")
+async def play(ctx, *, query: str):
+    if ctx.guild.id not in voice_clients:
+        await join(ctx)
+
+    vc = voice_clients[ctx.guild.id]
+
+    if "youtube.com" in query or "youtu.be" in query:
+        url = query
+    else:
+        with yt_dlp.YoutubeDL({'format': 'bestaudio', 'quiet': True, 'default_search': 'ytsearch'}) as ydl:
+            info = ydl.extract_info(f"ytsearch:{query}", download=False)['entries'][0]
+            url = info['webpage_url']
+
+    queues.setdefault(ctx.guild.id, []).append(url)
+
+    if not vc.is_playing():
+        await play_next(ctx)
+    else:
+        await ctx.send("Added to queue!")
+
+@bot.command(name="skip")
+async def skip(ctx):
+    if ctx.guild.id in voice_clients and voice_clients[ctx.guild.id].is_playing():
+        voice_clients[ctx.guild.id].stop()
+        await ctx.send("Skipped! ⏭️")
+    else:
+        await ctx.send("Nothing is playing.")
+
+@bot.command(name="stop")
+async def stop(ctx):
+    if ctx.guild.id in voice_clients:
+        voice_clients[ctx.guild.id].stop()
+        queues[ctx.guild.id] = []
+        await ctx.send("Stopped music.")
+
+# ====================== OTHER COMMANDS ======================
+
+@bot.command(name="speak")
+async def speak(ctx, *, text: str):
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                "https://api.x.ai/v1/tts",
+                json={"text": text, "voice_id": "ara", "language": "en"},
+                headers={"Authorization": f"Bearer {os.getenv('XAI_API_KEY')}"}
+            ) as resp:
+                if resp.status == 200:
+                    audio = await resp.read()
+                    await ctx.send(file=discord.File(io.BytesIO(audio), "voice.mp3"))
+    except:
+        await ctx.send("Voice failed.")
+
+@bot.command(name="song")
+async def song_command(ctx, *, country: str = None):
+    if not country: return await ctx.send("Which country?")
+    answer = await get_accurate_grok_answer(f"Current most popular song in {country}")
+    await ctx.send(f"**🎵 Top song in {country}:** {answer}")
+
+@bot.command(name="singer")
+async def singer_command(ctx, *, country: str = None):
+    if not country: return await ctx.send("Which country?")
+    answer = await get_accurate_grok_answer(f"Most popular singer in {country}")
+    await ctx.send(f"**🎤 Top singer in {country}:** {answer}")
+
+async def get_accurate_grok_answer(question: str):
+    def _search():
+        try:
+            resp = sync_client.responses.create(
+                model="grok-4.3",
+                input=[{"role": "user", "content": question}],
+                tools=[{"type": "web_search"}]
+            )
+            return resp.output[0].content[0].text.strip() if hasattr(resp, 'output') else "Couldn't fetch."
+        except:
+            return "Couldn't fetch right now."
+    return await asyncio.to_thread(_search)
+
+@bot.event
+async def on_ready():
+    print(f"✅ AstraMizu is online as {bot.user} | YouTube Music Ready!")
+
+bot.run(os.getenv("DISCORD_TOKEN"))
