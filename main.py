@@ -10,6 +10,10 @@ import io
 import yt_dlp
 import random
 
+# Load .env if exists
+from dotenv import load_dotenv
+load_dotenv()
+
 intents = discord.Intents.default()
 intents.message_content = True
 intents.voice_states = True
@@ -17,13 +21,15 @@ intents.guilds = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
+XAI_KEY = os.getenv("XAI_API_KEY")
+
 client = AsyncOpenAI(
-    api_key=os.getenv("XAI_API_KEY"),
+    api_key=XAI_KEY,
     base_url="https://api.x.ai/v1"
 )
 
 sync_client = OpenAI(
-    api_key=os.getenv("XAI_API_KEY"),
+    api_key=XAI_KEY,
     base_url="https://api.x.ai/v1"
 )
 
@@ -158,7 +164,7 @@ async def speak(ctx, *, text: str):
             async with session.post(
                 "https://api.x.ai/v1/tts",
                 json={"text": text, "voice_id": "ara", "language": "en"},
-                headers={"Authorization": f"Bearer {os.getenv('XAI_API_KEY')}"}
+                headers={"Authorization": f"Bearer {XAI_KEY}"}
             ) as resp:
                 if resp.status == 200:
                     audio = await resp.read()
