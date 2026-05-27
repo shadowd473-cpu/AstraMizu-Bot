@@ -63,11 +63,45 @@ async def on_reaction_add(reaction, user):
     if emoji in REACTION_RESPONSES:
         await reaction.message.channel.send(random.choice(REACTION_RESPONSES[emoji]))
 
+# MAIN HANDLER - FIXED
+@bot.event
+async def on_message(message):
+    if message.author.bot:
+        return
+
+    content_lower = message.content.lower()
+    is_mentioned = bot.user.mentioned_in(message)
+    has_trigger = any(word in content_lower for word in TRIGGER_WORDS)
+
+    # Always respond if mentioned or has trigger
+    if not (is_mentioned or has_trigger):
+        await bot.process_commands(message)
+        return
+
+    try:
+        # Simple response for now
+        response = await client.chat.completions.create(
+            model="grok-4",
+            messages=[
+                {"role": "system", "content": "You are AstraMizu, a cheerful and playful anime girl. Be cute and fun."},
+                {"role": "user", "content": message.content}
+            ],
+            max_tokens=300,
+            temperature=0.9
+        )
+        reply = response.choices[0].message.content
+        await message.reply(reply)
+    except Exception as e:
+        print(f"Message error: {e}")
+        await message.reply("Sorry, I'm a bit tired right now~")
+
+    await bot.process_commands(message)
+
 # ====================== MUSIC SYSTEM ======================
 
 def get_ydl_opts():
     return {
-        'format': 'bestaudio[ext=m4a]/bestaudio/best',
+        'format': 'bestaudio/best',
         'noplaylist': True,
         'quiet': True,
         'no_warnings': True,
@@ -108,8 +142,19 @@ async def join(ctx):
         voice_clients[ctx.guild.id] = vc
         queues[ctx.guild.id] = []
         await ctx.send(f"Joined {ctx.author.voice.channel.name}! ✨")
+        asyncio.create_task(keep_alive(vc))
     except Exception as e:
         await ctx.send(f"Failed to join: {str(e)[:80]}")
+
+async def keep_alive(vc):
+    while vc.is_connected():
+        try:
+            if not vc.is_playing():
+                source = discord.FFmpegPCMAudio(io.BytesIO(b'\x00' * 48000), pipe=True)
+                vc.play(source)
+            await asyncio.sleep(25)
+        except:
+            break
 
 @bot.command(name="leave")
 async def leave(ctx):
@@ -133,7 +178,7 @@ async def play(ctx, *, query: str):
     if "youtube.com" in query or "youtu.be" in query:
         url = query
     else:
-        with yt_dlp.YoutubeDL({'format': 'bestaudio[ext=m4a]/bestaudio/best', 'quiet': True, 'default_search': 'ytsearch', 'nocheckcertificate': True}) as ydl:
+        with yt_dlp.YoutubeDL({'format': 'bestaudio/best', 'quiet': True, 'default_search': 'ytsearch', 'nocheckcertificate': True}) as ydl:
             info = ydl.extract_info(f"ytsearch:{query}", download=False)['entries'][0]
             url = info['webpage_url']
 
@@ -158,23 +203,6 @@ async def stop(ctx):
         voice_clients[ctx.guild.id].stop()
         queues[ctx.guild.id] = []
         await ctx.send("Stopped music.")
-
-# ====================== OTHER COMMANDS ======================
-
-@bot.command(name="speak")
-async def speak(ctx, *, text: str):
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                "https://api.x.ai/v1/tts",
-                json={"text": text, "voice_id": "ara", "language": "en"},
-                headers={"Authorization": f"Bearer {XAI_KEY}"}
-            ) as resp:
-                if resp.status == 200:
-                    audio = await resp.read()
-                    await ctx.send(file=discord.File(io.BytesIO(audio), "voice.mp3"))
-    except:
-        await ctx.send("Voice failed.")
 
 @bot.command(name="song")
 async def song_command(ctx, *, country: str = None):
@@ -204,6 +232,6 @@ async def get_accurate_grok_answer(question: str):
 
 @bot.event
 async def on_ready():
-    print(f"✅ AstraMizu is online as {bot.user} | YouTube Music Ready!")
+    print(f"✅ AstraMizu is online as {bot.user} | Ready!")
 
 bot.run(os.getenv("DISCORD_TOKEN"))
