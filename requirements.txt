@@ -1,0 +1,8 @@
+discord.py[voice]
+yt-dlp
+aiohttp
+openai
+chromadb
+sentence-transformers
+PyNaCl
+ffmpeg-python
