@@ -71,6 +71,7 @@ def get_ydl_opts():
         'noplaylist': True,
         'quiet': True,
         'no_warnings': True,
+        'nocheckcertificate': True,
         'extractor_args': {'youtube': {'player_client': ['ios', 'web']}},
     }
 
@@ -132,7 +133,7 @@ async def play(ctx, *, query: str):
     if "youtube.com" in query or "youtu.be" in query:
         url = query
     else:
-        with yt_dlp.YoutubeDL({'format': 'bestaudio/best', 'quiet': True, 'default_search': 'ytsearch'}) as ydl:
+        with yt_dlp.YoutubeDL({'format': 'bestaudio/best', 'quiet': True, 'default_search': 'ytsearch', 'nocheckcertificate': True}) as ydl:
             info = ydl.extract_info(f"ytsearch:{query}", download=False)['entries'][0]
             url = info['webpage_url']
 
