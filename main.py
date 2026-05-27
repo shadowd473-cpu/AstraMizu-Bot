@@ -192,8 +192,7 @@ async def get_accurate_grok_answer(question: str):
         try:
             resp = sync_client.chat.completions.create(
                 model="grok-4",
-                messages=[{"role": "user", "content": question}],
-                tools=[{"type": "web_search"}],
+                messages=[{"role": "user", "content": f"Answer this accurately: {question}"}],
                 max_tokens=200
             )
             return resp.choices[0].message.content.strip()
